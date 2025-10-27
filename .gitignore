@@ -1,0 +1,80 @@
+# Local data & secrets
+data/
+.env
+.env.*
+*.env
+*.local
+*.secret
+
+# Project-specific generated content
+backend/tests/
+backend/media/
+media/
+
+# Python bytecode / cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Build & packaging artifacts
+build/
+logs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Django / runtime files
+db.sqlite3
+*.sqlite3
+*.log
+celerybeat-schedule
+celerybeat.pid
+*.pid
+instance/
+local_settings.py
+staticfiles/
+staticfiles_build/
+
+# Test, coverage & lint artifacts
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+*_coverage/
+htmlcov/
+.pytest_cache/
+.tox/
+.mypy_cache/
+.pyre/
+.ruff_cache/
+pytestdebug.log
+
+# Editor & OS artifacts
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Thumbs.db

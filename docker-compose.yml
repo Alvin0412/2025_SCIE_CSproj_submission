@@ -1,0 +1,98 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    volumes:
+      - ./backend:/app/backend
+      - ./backend/deploy/entrypoint.sh:/app/entrypoint.sh
+      - ./logs:/logs
+    command: sh backend/deploy/entrypoint.sh
+    depends_on:
+      - db
+      - redis
+      - qdrant
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - QDRANT_HOST=${QDRANT_HOST}
+      - QDRANT_PORT=${QDRANT_PORT}
+      - DEEPSEEK_APIKEY=${DEEPSEEK_APIKEY}
+      - OPENROUTER_APIKEY=${OPENROUTER_APIKEY}
+    healthcheck:
+      test: ["CMD", "/bin/bash", "/app/backend/deploy/healthcheck.sh"]
+      interval: 30s
+      retries: 3
+      start_period: 10s
+      timeout: 10s
+  nginx:
+    image: nginx:1.25
+    depends_on:
+      - web
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./backend/deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./backend/staticfiles:/var/www/pastpaperrank/static:ro
+      - ./backend/media:/var/www/pastpaperrank/media:ro
+#  worker: 暂时不需要container level的worker
+#    build:
+#      context: .
+#      dockerfile: backend/Dockerfile
+#    volumes:
+#      - ./backend:/app/backend
+#    command: python backend/start_worker.py
+#    depends_on:
+#      - db
+#      - redis
+#    environment:
+#      - DB_HOST=${DB_HOST}
+#      - DB_PORT=${DB_PORT}
+#      - DB_NAME=${DB_NAME}
+#      - DB_USER=${DB_USER}
+#      - DB_PASSWORD=${DB_PASSWORD}
+#      - REDIS_HOST=${REDIS_HOST}
+#      - REDIS_PORT=${REDIS_PORT}
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:6.2
+    restart: always
+
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant_data:/qdrant/storage
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "False"
+      PGADMIN_CONFIG_WTF_CSRF_CHECK_DEFAULT: "False"
+      PGADMIN_CONFIG_WTF_CSRF_ENABLED: "False"
+
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    volumes:
+      - ./data/pgadmin:/var/lib/pgadmin

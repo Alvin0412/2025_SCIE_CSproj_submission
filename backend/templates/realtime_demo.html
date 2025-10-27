@@ -1,0 +1,310 @@
+<!-- templates/realtime_demo.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Realtime Demo</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+    body {
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      margin: 24px;
+      background: #f8f9fb;
+      color: #1f2a37;
+    }
+    h2 { margin-bottom: 8px; }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      padding: 16px 20px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+      margin-bottom: 18px;
+    }
+    .flex { display: flex; gap: 16px; flex-wrap: wrap; }
+    .flex > * { flex: 1 1 320px; }
+    input, button, textarea {
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #cbd5f5;
+      font-size: 15px;
+      font-family: inherit;
+    }
+    textarea { width: 100%; resize: vertical; min-height: 80px; }
+    button {
+      cursor: pointer;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      transition: background 0.2s ease;
+    }
+    button:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+    code {
+      font-size: 14px;
+      background: #f2f4f8;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    pre {
+      background: #0f172a;
+      color: #e0f2ff;
+      padding: 12px;
+      border-radius: 8px;
+      max-height: 280px;
+      overflow: auto;
+      font-size: 13px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 8px 6px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+    }
+    th {
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #475569;
+    }
+    .muted { color:#64748b }
+    #log { white-space: pre-wrap; border: 1px solid #e2e8f0; padding: 8px; min-height: 140px; background:#0f172a; color:#cbd5f5; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <h2>Realtime Demo</h2>
+
+  <div class="card">
+    <div class="flex">
+      <div>
+        <div class="muted">WebSocket Endpoint</div>
+        <code id="ws-url">{{ ws_url }}</code>
+      </div>
+      <div>
+        <div class="muted">Subscription RID</div>
+        <code id="rid">(not subscribed)</code>
+      </div>
+      <div style="align-self:flex-end;">
+        <button id="btn-connect">Connect & Subscribe</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label class="muted" for="text">Query</label>
+    <textarea id="text">Find recent IGCSE chemistry questions about mole concept and stoichiometry.</textarea>
+    <div style="margin-top:8px;">
+      <button id="btn-start" disabled>Start Retrieval</button>
+      <button id="btn-ping"  disabled style="background:#475569;">Ping</button>
+    </div>
+    <p class="muted" style="margin-top:8px;">Adjust the query and press “Start Retrieval” to run the LangGraph pipeline. Intermediate stages stream live below.</p>
+  </div>
+
+  <div class="card" id="clarify-card" style="display:none;">
+    <h3 style="margin-top:0;">Clarification Requested</h3>
+    <p class="muted" id="clarify-prompt">—</p>
+    <textarea id="clarify-input" placeholder="Add more detail so the agent can proceed."></textarea>
+    <div style="margin-top:8px;">
+      <button id="btn-clarify" style="background:#059669;">Send Clarification</button>
+    </div>
+    <p class="muted" style="margin-top:8px;">Your response is appended to the conversation history and the agent restarts automatically.</p>
+  </div>
+
+  <div class="flex">
+    <div class="card">
+      <h3 style="margin-top:0;">Intent Blueprint</h3>
+      <pre id="intent-data">Awaiting intent...</pre>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Workspace Summary</h3>
+      <pre id="workspace-data">No workspace data yet.</pre>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Results</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Paper</th>
+          <th>Year</th>
+          <th>Path</th>
+          <th>Score</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody id="results-body">
+        <tr><td colspan="6" class="muted">No results yet.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Log</h3>
+    <div id="log"></div>
+  </div>
+
+<script>
+  const wsUrl = document.getElementById("ws-url").textContent.trim();
+  const $log  = document.getElementById("log");
+  const $rid  = document.getElementById("rid");
+  const $btnConnect = document.getElementById("btn-connect");
+  const $btnStart   = document.getElementById("btn-start");
+  const $btnPing    = document.getElementById("btn-ping");
+  const $text       = document.getElementById("text");
+  const $intentData = document.getElementById("intent-data");
+  const $workspaceData = document.getElementById("workspace-data");
+  const $resultsBody = document.getElementById("results-body");
+  const $clarifyCard = document.getElementById("clarify-card");
+  const $clarifyPrompt = document.getElementById("clarify-prompt");
+  const $clarifyInput = document.getElementById("clarify-input");
+  const $btnClarifySend = document.getElementById("btn-clarify");
+
+  let ws = null;
+  let rid = null;
+  let conversation = [];
+  let lastQuery = "";
+  let awaitingClarify = false;
+
+  function log(x) {
+    const s = (typeof x === "string") ? x : JSON.stringify(x, null, 2);
+    $log.textContent += s + "\n";
+    $log.scrollTop = $log.scrollHeight;
+  }
+
+  function connect() {
+    const scheme = (location.protocol === "https:") ? "wss" : "ws";
+    ws = new WebSocket(`${scheme}://${location.host}${wsUrl}`);
+
+    ws.onopen = () => {
+      log("WS opened, sending subscribe (no id/token)...");
+      ws.send(JSON.stringify({ action: "subscribe" })); // 让后端生成 rid/token
+    };
+
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return log("Non-JSON: " + ev.data); }
+
+      if (msg && msg.type === "subscribed" && msg.rid) {
+        rid = msg.rid;
+        $rid.textContent = rid;
+        $btnStart.disabled = false;
+        $btnPing.disabled  = false;
+        $btnClarifySend.disabled = true;
+        return log(msg);
+      }
+
+      handleEvent(msg);
+    };
+
+    ws.onclose = (e) => { log(`WS closed (${e.code})`); $btnStart.disabled = true; $btnPing.disabled = true; };
+    ws.onerror = (e) => { log("WS error"); console.error(e); };
+  }
+
+  function startTask() {
+    if (!rid) return log("No rid yet");
+    if (!ws || ws.readyState !== WebSocket.OPEN) return log("WS not open");
+    lastQuery = ($text.value || "").trim();
+    if (!lastQuery) return log("Query cannot be empty");
+    conversation = [{ role: "user", content: lastQuery }];
+    awaitingClarify = false;
+    toggleClarify(false);
+    ws.send(JSON.stringify({
+      action: "start",     // 或者 "namespace.start"（看你 __init_subclass__ 的名字空间）
+      rid: rid,             // 你后端的 subscribe/verify 是用 rid/token；start 这边至少传 rid
+      query: lastQuery,    // 任务参数原样穿过去
+      options: { limit: 8, keyword_limit: 20, semantic_limit: 12, conversation: conversation }
+    }));
+    log({sent: "start", rid: rid, text: lastQuery});
+  }
+
+  function ping() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: "ping" }));
+    }
+  }
+
+  $btnConnect.addEventListener("click", connect);
+  $btnStart.addEventListener("click", startTask);
+  $btnPing.addEventListener("click",  ping);
+  $btnClarifySend.addEventListener("click", sendClarification);
+
+  function handleEvent(data) {
+    log(data);
+    const eventType = data.event;
+    if (eventType === "intent") {
+      $intentData.textContent = JSON.stringify(data.blueprint, null, 2);
+      awaitingClarify = false;
+      toggleClarify(false);
+    } else if (eventType === "keyword_pass" || eventType === "semantic_pass") {
+      $workspaceData.textContent = JSON.stringify(data.workspace, null, 2);
+    } else if (eventType === "complete") {
+      renderResults(data.results || []);
+      $workspaceData.textContent = JSON.stringify(data.workspace_summary || {}, null, 2);
+      awaitingClarify = false;
+      toggleClarify(false);
+    } else if (eventType === "clarify") {
+      conversation.push({ role: "assistant", content: data.prompt || "Please add more detail." });
+      awaitingClarify = true;
+      $clarifyPrompt.textContent = data.prompt || "Please add more detail.";
+      toggleClarify(true);
+    } else if (eventType === "error" || data.error) {
+      $workspaceData.textContent = `Error: ${data.error || "unknown"}`;
+      awaitingClarify = false;
+      toggleClarify(false);
+    }
+  }
+
+  function toggleClarify(show) {
+    $clarifyCard.style.display = show ? "block" : "none";
+    $btnClarifySend.disabled = !show;
+    if (!show) {
+      $clarifyInput.value = "";
+    }
+  }
+
+  function sendClarification() {
+    if (!awaitingClarify) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return log("WS not open");
+    const reply = ($clarifyInput.value || "").trim();
+    if (!reply) return;
+    conversation.push({ role: "user", content: reply });
+    ws.send(JSON.stringify({
+      action: "start",
+      rid: rid,
+      query: lastQuery,
+      options: { limit: 8, keyword_limit: 20, semantic_limit: 12, conversation: conversation }
+    }));
+    $clarifyInput.value = "";
+    awaitingClarify = false;
+    toggleClarify(false);
+  }
+
+  function renderResults(results) {
+    if (!results.length) {
+      $resultsBody.innerHTML = '<tr><td colspan="6" class="muted">No matches found.</td></tr>';
+      return;
+    }
+    $resultsBody.innerHTML = results.map((row, idx) => `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${row.paper_code || "—"}</td>
+        <td>${row.year || "—"}</td>
+        <td>${row.path || "—"}</td>
+        <td>${(row.score ?? 0).toFixed(3)}</td>
+        <td>${row.source || "—"}</td>
+      </tr>
+    `).join("");
+  }
+</script>
+</body>
+</html>
